@@ -266,21 +266,52 @@ async def request_password_reset(
     reset_request: schemas.PasswordReset,
     db: Session = Depends(get_db)
 ):
-    user = db.query(models.User).filter(models.User.email == reset_request.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    reset_token = create_access_token(data={"sub": user.username}, expires_delta=timedelta(hours=1))
-    
-    send_email(
-        user.email,
-        "Password Reset Request",
-        "password_reset.html",
-        username=user.username,
-        reset_token=reset_token
-    )
-    
-    return {"message": "Password reset email sent"}
+    try:
+        print(f"Password reset requested for email: {reset_request.email}")
+        
+        # Find user
+        user = db.query(models.User).filter(models.User.email == reset_request.email).first()
+        if not user:
+            print(f"No user found with email: {reset_request.email}")
+            # Don't reveal that the email doesn't exist
+            return {"message": "If an account exists with this email, you will receive password reset instructions."}
+        
+        # Generate reset token
+        reset_token = create_access_token(
+            data={"sub": user.username},
+            expires_delta=timedelta(hours=1)
+        )
+        
+        # Create reset link
+        reset_link = f"http://196.27.126.114:8400/reset-password/{reset_token}"
+        
+        print(f"Generated reset token for user: {user.username}")
+        
+        try:
+            # Send email
+            send_email(
+                user.email,
+                "Password Reset Request",
+                "password_reset.html",
+                username=user.username,
+                reset_token=reset_token,
+                reset_link=reset_link
+            )
+            print(f"Password reset email sent to: {user.email}")
+        except Exception as e:
+            print(f"Error sending password reset email: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send password reset email. Please try again later."
+            )
+        
+        return {"message": "If an account exists with this email, you will receive password reset instructions."}
+    except Exception as e:
+        print(f"Unexpected error in password reset: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred. Please try again later."
+        )
 
 @app.post("/password-update/")
 async def update_password(
