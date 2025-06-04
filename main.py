@@ -391,17 +391,31 @@ async def get_all_audio_files(
     author: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    query = db.query(models.AudioFile)
-    
-    # Apply filters if provided
-    if category:
-        query = query.filter(models.AudioFile.category == category)
-    if author:
-        query = query.filter(models.AudioFile.author == author)
-    
-    # Order by date descending (newest first)
-    audio_files = query.order_by(models.AudioFile.date.desc()).offset(skip).limit(limit).all()
-    return audio_files
+    try:
+        print("Fetching audio files...")
+        query = db.query(models.AudioFile)
+        
+        # Apply filters if provided
+        if category:
+            query = query.filter(models.AudioFile.category == category)
+        if author:
+            query = query.filter(models.AudioFile.author == author)
+        
+        # Order by date descending (newest first)
+        audio_files = query.order_by(models.AudioFile.date.desc()).offset(skip).limit(limit).all()
+        print(f"Found {len(audio_files)} audio files")
+        
+        # Debug print first file if exists
+        if audio_files:
+            print(f"First file data: {audio_files[0].__dict__}")
+        
+        return audio_files
+    except Exception as e:
+        print(f"Error in get_all_audio_files: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching audio files: {str(e)}"
+        )
 
 @app.get("/users/me/", response_model=schemas.User)
 async def read_users_me(current_user: models.User = Depends(get_current_active_user)):

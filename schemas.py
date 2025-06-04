@@ -58,11 +58,11 @@ class PasswordUpdate(BaseModel):
 class AudioFileBase(BaseModel):
     title: str
     filename: str
-    category: Optional[str] = None
-    author: Optional[str] = None
-    duration: Optional[str] = None
-    date: Optional[datetime] = None
-    image: Optional[str] = None
+    category: str
+    author: str
+    duration: str
+    date: datetime
+    image: str
     text_document: Optional[str] = None
 
 class AudioFileCreate(AudioFileBase):
@@ -70,7 +70,7 @@ class AudioFileCreate(AudioFileBase):
 
 class AudioFile(AudioFileBase):
     id: int
-    transcription: str
+    transcription: Optional[str] = None
     user_id: Optional[int] = None
     created_at: datetime
 
