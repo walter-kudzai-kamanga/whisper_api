@@ -36,13 +36,9 @@ class AudioFile(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
     filename = Column(String, nullable=False)
-    transcription = Column(String, nullable=True)
-    category = Column(String, nullable=False)
-    author = Column(String, nullable=False)
-    duration = Column(String, nullable=False)
+    transcription = Column(String, nullable=False)
+    transcription_with_timestamps = Column(Text, nullable=True)  # Store transcription with timestamps
     date = Column(DateTime, nullable=False)
-    image = Column(String, nullable=False)
-    text_document = Column(String, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

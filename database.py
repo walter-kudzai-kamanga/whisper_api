@@ -10,11 +10,15 @@ load_dotenv()
 # Create the database directory if it doesn't exist
 os.makedirs("instance", exist_ok=True)
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./instance/whisper.db"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
+# Create engine with echo=True for debugging and connect_args to ensure no caching
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    echo=True  # Enable SQL query logging
 )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

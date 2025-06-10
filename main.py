@@ -122,7 +122,7 @@ async def process_audio_file(
         print(f"Split audio into {len(chunks)} chunks")
         
         # Process chunks sequentially with time limit for each
-        results = []
+        all_segments = []
         for idx, chunk in enumerate(chunks):
             print(f"Processing chunk {idx + 1}/{len(chunks)}")
             start_time = time.time()
@@ -138,11 +138,24 @@ async def process_audio_file(
                         best_of=1,    # Reduce best_of for speed
                         temperature=0 # Disable temperature for speed
                     )
-                    results.append({
-                        "text": result["text"],
-                        "start_time": chunk_starts[idx],
-                        "duration": len(chunk) / SAMPLE_RATE
-                    })
+                    
+                    # Get segments with timestamps
+                    segments = result.get("segments", [])
+                    chunk_text = []
+                    
+                    for segment in segments:
+                        start = segment.get("start", 0) + chunk_starts[idx]
+                        end = segment.get("end", 0) + chunk_starts[idx]
+                        text = segment.get("text", "").strip()
+                        
+                        if text:
+                            chunk_text.append(text)
+                            all_segments.append({
+                                "start_time": start,
+                                "end_time": end,
+                                "text": text
+                            })
+                    
             except TimeoutError:
                 print(f"Chunk {idx + 1} timed out, skipping...")
                 continue
@@ -150,23 +163,17 @@ async def process_audio_file(
             processing_time = time.time() - start_time
             print(f"Chunk {idx + 1} completed in {processing_time:.2f} seconds")
         
-        if not results:
-            raise Exception("No chunks were successfully processed")
+        if not all_segments:
+            raise Exception("No segments were successfully processed")
         
-        # Combine results, handling overlaps
-        final_text = []
-        for i, result in enumerate(results):
-            if i > 0:
-                # Add a space between chunks
-                final_text.append(" ")
-            final_text.append(result["text"])
+        # Combine results
+        final_text = " ".join(seg["text"] for seg in all_segments)
         
         return {
-            "text": "".join(final_text),
+            "text": final_text,
+            "segments": all_segments,
             "duration": duration,
-            "language": "en",  # Assuming English for all chunks
-            "num_chunks": len(chunks),
-            "successful_chunks": len(results)
+            "language": "en"  # Assuming English for all chunks
         }
     except Exception as e:
         print(f"Error in process_audio_file: {str(e)}")
@@ -337,15 +344,11 @@ async def update_password(
 
 @app.post("/audio-files/", response_model=schemas.AudioFile)
 async def create_audio_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(...),
-    category: str = Form(...),
-    author: str = Form(...),
-    duration: str = Form(...),
+    transcription: str = Form(...),
+    transcription_with_timestamps: Optional[str] = Form(None),  # Optional field
     date: datetime = Form(...),
-    image: str = Form(...),
-    text_document: str = Form(None),
     db: Session = Depends(get_db)
 ):
     try:
@@ -380,20 +383,13 @@ async def create_audio_file(
                     content = await file.read()
                     buffer.write(content)
                 
-                # Process the audio file
-                result = await process_audio_file(temp_filename)
-                
                 # Create audio file record
                 audio_file = models.AudioFile(
                     title=title,
                     filename=os.path.basename(temp_filename),
-                    transcription=result["text"],
-                    category=category,
-                    author=author,
-                    duration=duration,
+                    transcription=transcription,
+                    transcription_with_timestamps=transcription_with_timestamps,  # Can be None
                     date=date,
-                    image=image,
-                    text_document=text_document,
                     user_id=None
                 )
                 db.add(audio_file)
@@ -418,27 +414,18 @@ async def create_audio_file(
 async def get_all_audio_files(
     skip: int = 0,
     limit: int = 100,
-    category: Optional[str] = None,
-    author: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     try:
         print("Fetching audio files...")
         query = db.query(models.AudioFile)
         
-        # Apply filters if provided
-        if category:
-            query = query.filter(models.AudioFile.category == category)
-        if author:
-            query = query.filter(models.AudioFile.author == author)
-        
         # Order by date descending (newest first)
         audio_files = query.order_by(models.AudioFile.date.desc()).offset(skip).limit(limit).all()
         print(f"Found {len(audio_files)} audio files")
         
-        # Debug print first file if exists
-        if audio_files:
-            print(f"First file data: {audio_files[0].__dict__}")
+        if not audio_files:
+            return []  # Return empty list instead of 404 error
         
         return audio_files
     except Exception as e:
@@ -755,48 +742,40 @@ async def transcribe_audio(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    if not file:
+    if not file.content_type in SUPPORTED_AUDIO_FORMATS:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No file provided"
+            status_code=400,
+            detail=f"Unsupported file format. Supported formats: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}"
         )
     
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No filename provided"
-        )
-    
-    # Validate file type
-    if not file.content_type or file.content_type not in SUPPORTED_AUDIO_FORMATS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type. Supported types are: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}"
-        )
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=get_file_extension(file.content_type)) as temp_file:
+        # Copy the uploaded file to the temporary file
+        shutil.copyfileobj(file.file, temp_file)
+        temp_file_path = temp_file.name
     
     try:
-        # Create a temporary directory for processing
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Generate temp filename with appropriate extension
-            extension = get_file_extension(file.content_type)
-            temp_filename = os.path.join(temp_dir, f"temp_{uuid4().hex}{extension}")
-            
-            # Save the file
-            with open(temp_filename, "wb") as buffer:
-                content = await file.read()
-                buffer.write(content)
-            
-            # Process the audio file
-            result = await process_audio_file(temp_filename)
-            
-            return {
-                "filename": file.filename,
-                "transcription": result["text"],
-                "duration": result["duration"],
-                "language": result["language"]
-            }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing file: {str(e)}"
+        # Process the audio file
+        result = await process_audio_file(temp_file_path)
+        
+        # Create TranscriptionWithTimestamps object
+        timestamped_transcription = schemas.TranscriptionWithTimestamps(
+            segments=[
+                schemas.TimestampSegment(
+                    start_time=seg["start_time"],
+                    end_time=seg["end_time"],
+                    text=seg["text"]
+                )
+                for seg in result["segments"]
+            ]
         )
+        
+        return {
+            "transcription": result["text"],
+            "transcription_with_timestamps": timestamped_transcription,
+            "duration": result["duration"],
+            "language": result["language"]
+        }
+    finally:
+        # Clean up the temporary file
+        os.unlink(temp_file_path)

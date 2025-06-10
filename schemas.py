@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 
 class UserBase(BaseModel):
@@ -55,22 +55,55 @@ class PasswordUpdate(BaseModel):
     token: str
     new_password: str
 
+class TimestampSegment(BaseModel):
+    start_time: float  # Time in seconds
+    end_time: float    # Time in seconds
+    text: str         # The transcribed text for this segment
+
+class TranscriptionWithTimestamps(BaseModel):
+    segments: List[TimestampSegment]
+    
+    def to_string(self) -> str:
+        """Convert the timestamped segments to a string format"""
+        return "\n".join(
+            f"[{int(seg.start_time//3600):02d}:{int((seg.start_time%3600)//60):02d}:{int(seg.start_time%60):02d}] {seg.text}"
+            for seg in self.segments
+        )
+    
+    @classmethod
+    def from_string(cls, text: str) -> 'TranscriptionWithTimestamps':
+        """Convert a string format back to timestamped segments"""
+        segments = []
+        for line in text.strip().split('\n'):
+            if not line.strip():
+                continue
+            # Extract timestamp and text
+            timestamp_str = line[1:line.find(']')]
+            text = line[line.find(']')+1:].strip()
+            
+            # Convert timestamp to seconds
+            h, m, s = map(int, timestamp_str.split(':'))
+            start_time = h * 3600 + m * 60 + s
+            
+            segments.append(TimestampSegment(
+                start_time=start_time,
+                end_time=start_time + 5,  # Default 5 second duration if not specified
+                text=text
+            ))
+        return cls(segments=segments)
+
 class AudioFileBase(BaseModel):
     title: str
+    transcription: str
+    transcription_with_timestamps: Optional[str] = None  # Make it optional with default None
     filename: str
-    category: str
-    author: str
-    duration: str
     date: datetime
-    image: str
-    text_document: Optional[str] = None
 
 class AudioFileCreate(AudioFileBase):
     pass
 
 class AudioFile(AudioFileBase):
     id: int
-    transcription: Optional[str] = None
     user_id: Optional[int] = None
     created_at: datetime
 
