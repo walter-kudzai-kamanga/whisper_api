@@ -349,6 +349,8 @@ async def create_audio_file(
     transcription: str = Form(...),
     transcription_with_timestamps: Optional[str] = Form(None),  # Optional field
     date: datetime = Form(...),
+    author: Optional[str] = Form(None),  # New field
+    category: Optional[str] = Form(None),  # New field
     db: Session = Depends(get_db)
 ):
     try:
@@ -390,6 +392,8 @@ async def create_audio_file(
                     transcription=transcription,
                     transcription_with_timestamps=transcription_with_timestamps,  # Can be None
                     date=date,
+                    author=author,  # New field
+                    category=category,  # New field
                     user_id=None
                 )
                 db.add(audio_file)

@@ -39,6 +39,8 @@ class AudioFile(Base):
     transcription = Column(String, nullable=False)
     transcription_with_timestamps = Column(Text, nullable=True)  # Store transcription with timestamps
     date = Column(DateTime, nullable=False)
+    author = Column(String, nullable=True)  # New field
+    category = Column(String, nullable=True)  # New field
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

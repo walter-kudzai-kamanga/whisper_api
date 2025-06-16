@@ -98,6 +98,8 @@ class AudioFileBase(BaseModel):
     transcription_with_timestamps: Optional[str] = None  # Make it optional with default None
     filename: str
     date: datetime
+    author: Optional[str] = None  # New field
+    category: Optional[str] = None  # New field
 
 class AudioFileCreate(AudioFileBase):
     pass
