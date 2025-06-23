@@ -170,15 +170,27 @@ async def process_audio_file(
         # Create transcription with timestamps
         transcription_with_timestamps = ""
         for segment in all_segments:
-            start_time = int(segment.get("start", 0))
-            end_time = int(segment.get("end", 0))
-            text = segment.get("text", "").strip()
-            if text:
-                transcription_with_timestamps += f"[{start_time:02d}:{end_time:02d}] {text}\n"
+            try:
+                start_time = int(segment.get("start", 0))
+                end_time = int(segment.get("end", 0))
+                text = segment.get("text", "").strip()
+                if text:
+                    transcription_with_timestamps += f"[{start_time:02d}:{end_time:02d}] {text}\n"
+            except KeyError as e:
+                print("KeyError:", e, "in segment:", segment)
+        
+        # Map segment keys for API response
+        mapped_segments = []
+        for segment in all_segments:
+            mapped_segments.append({
+                'start_time': segment.get('start', 0),
+                'end_time': segment.get('end', 0),
+                'text': segment.get('text', '')
+            })
         
         return {
             "text": full_text,
-            "segments": all_segments,
+            "segments": mapped_segments,
             "transcription_with_timestamps": transcription_with_timestamps.strip()
         }
         
@@ -896,8 +908,8 @@ async def transcribe_audio(
         return {
             "transcription": result["text"],
             "transcription_with_timestamps": timestamped_transcription,
-            "duration": result["duration"],
-            "language": result["language"]
+            "duration": result.get("duration", 0),
+            "language": result.get("language", "en")
         }
     finally:
         # Clean up the temporary file
