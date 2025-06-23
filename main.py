@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Form
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Form, Request
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -24,6 +24,8 @@ import numpy as np
 import signal
 from contextlib import contextmanager
 import time
+from fastapi.responses import FileResponse, JSONResponse
+import requests
 
 from database import engine, get_db
 import models
@@ -65,9 +67,10 @@ model = whisper.load_model("tiny", device=device)
 # Audio processing constants
 SAMPLE_RATE = 16000  # Whisper expects 16kHz audio
 
-# Email configuration
+# SendGrid Email configuration
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "your-verified-sender@yourdomain.com")
+FROM_NAME = os.getenv("FROM_NAME", "Audio Transcription API")
 
 # Email template loader
 template_loader = jinja2.FileSystemLoader(searchpath="./templates")
@@ -87,6 +90,8 @@ SUPPORTED_AUDIO_FORMATS = {
 
 # Create a thread pool for CPU-bound tasks
 thread_pool = ThreadPoolExecutor(max_workers=4)
+
+AUDIO_STORAGE_PATH = os.path.join(os.path.dirname(__file__), "audio_storage")
 
 @contextmanager
 def time_limit(seconds):
@@ -141,40 +146,42 @@ async def process_audio_file(
                     
                     # Get segments with timestamps
                     segments = result.get("segments", [])
-                    chunk_text = []
                     
+                    # Adjust timestamps to account for chunk start time
                     for segment in segments:
-                        start = segment.get("start", 0) + chunk_starts[idx]
-                        end = segment.get("end", 0) + chunk_starts[idx]
-                        text = segment.get("text", "").strip()
-                        
-                        if text:
-                            chunk_text.append(text)
-                            all_segments.append({
-                                "start_time": start,
-                                "end_time": end,
-                                "text": text
-                            })
+                        segment["start"] += chunk_starts[idx]
+                        segment["end"] += chunk_starts[idx]
+                    
+                    all_segments.extend(segments)
+                    
+                    chunk_time = time.time() - start_time
+                    print(f"Chunk {idx + 1} processed in {chunk_time:.2f} seconds")
                     
             except TimeoutError:
                 print(f"Chunk {idx + 1} timed out, skipping...")
                 continue
-            
-            processing_time = time.time() - start_time
-            print(f"Chunk {idx + 1} completed in {processing_time:.2f} seconds")
+            except Exception as e:
+                print(f"Error processing chunk {idx + 1}: {str(e)}")
+                continue
         
-        if not all_segments:
-            raise Exception("No segments were successfully processed")
+        # Combine all segments
+        full_text = " ".join([segment.get("text", "").strip() for segment in all_segments])
         
-        # Combine results
-        final_text = " ".join(seg["text"] for seg in all_segments)
+        # Create transcription with timestamps
+        transcription_with_timestamps = ""
+        for segment in all_segments:
+            start_time = int(segment.get("start", 0))
+            end_time = int(segment.get("end", 0))
+            text = segment.get("text", "").strip()
+            if text:
+                transcription_with_timestamps += f"[{start_time:02d}:{end_time:02d}] {text}\n"
         
         return {
-            "text": final_text,
+            "text": full_text,
             "segments": all_segments,
-            "duration": duration,
-            "language": "en"  # Assuming English for all chunks
+            "transcription_with_timestamps": transcription_with_timestamps.strip()
         }
+        
     except Exception as e:
         print(f"Error in process_audio_file: {str(e)}")
         raise e
@@ -183,72 +190,160 @@ def get_file_extension(content_type: str) -> str:
     """Get file extension from content type"""
     return SUPPORTED_AUDIO_FORMATS.get(content_type, '.mp3')
 
-def send_email(to_email: str, subject: str, template_name: str, **kwargs):
+async def send_email_async(to_email: str, subject: str, template_name: str, **kwargs) -> bool:
+    """
+    Send email using SendGrid asynchronously
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        template_name: Name of the Jinja2 template file
+        **kwargs: Template variables
+        
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
     if not SENDGRID_API_KEY:
         print(f"Email not sent to {to_email}: SendGrid API key not configured")
-        return
-        
-    template = template_env.get_template(template_name)
-    html_content = template.render(**kwargs)
+        return False
     
     try:
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        # Render email template
+        template = template_env.get_template(template_name)
+        html_content = template.render(**kwargs)
+        
+        # Create SendGrid message
         message = Mail(
-            from_email=Email(FROM_EMAIL),
+            from_email=Email(FROM_EMAIL, FROM_NAME),
             to_emails=To(to_email),
             subject=subject,
             html_content=Content("text/html", html_content)
         )
+        
+        # Send email
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
         response = sg.send(message)
-        print(f"Email sent successfully to {to_email}")
-        print(f"Status code: {response.status_code}")
+        
+        if response.status_code in [200, 201, 202]:
+            print(f"Email sent successfully to {to_email} (Status: {response.status_code})")
+            return True
+        else:
+            print(f"SendGrid API error: {response.status_code} - {response.body}")
+            return False
+            
     except Exception as e:
-        print(f"Error sending email: {str(e)}")
-        # Continue with registration even if email fails
-        pass
+        print(f"Error sending email to {to_email}: {str(e)}")
+        return False
+
+def send_email_sync(to_email: str, subject: str, template_name: str, **kwargs) -> bool:
+    """
+    Send email using SendGrid synchronously (for backward compatibility)
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        template_name: Name of the Jinja2 template file
+        **kwargs: Template variables
+        
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    if not SENDGRID_API_KEY:
+        print(f"Email not sent to {to_email}: SendGrid API key not configured")
+        return False
+    
+    try:
+        # Render email template
+        template = template_env.get_template(template_name)
+        html_content = template.render(**kwargs)
+        
+        # Create SendGrid message
+        message = Mail(
+            from_email=Email(FROM_EMAIL, FROM_NAME),
+            to_emails=To(to_email),
+            subject=subject,
+            html_content=Content("text/html", html_content)
+        )
+        
+        # Send email
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        
+        if response.status_code in [200, 201, 202]:
+            print(f"Email sent successfully to {to_email} (Status: {response.status_code})")
+            return True
+        else:
+            print(f"SendGrid API error: {response.status_code} - {response.body}")
+            return False
+            
+    except Exception as e:
+        print(f"Error sending email to {to_email}: {str(e)}")
+        return False
 
 @app.post("/register/", response_model=schemas.User)
 async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already taken")
-    
-    hashed_password = get_password_hash(user.password)
-    db_user = models.User(
-        email=user.email,
-        username=user.username,
-        hashed_password=hashed_password,
-        roles=user.role,
-        created_at=datetime.utcnow(),
-        is_active=True,
-        is_verified=False
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    # Create notification for new account
-    notification = models.Notification(
-        type="new_account",
-        content=f"New user registered: {user.username}",
-        extra_data=json.dumps({"user_id": db_user.id, "email": user.email})
-    )
-    db.add(notification)
-    db.commit()
-    
-    # Send welcome email (will be skipped if SendGrid is not configured)
-    send_email(
-        user.email,
-        "Welcome to Audio Transcription API",
-        "welcome.html",
-        username=user.username
-    )
-    
-    return db_user
+    try:
+        print(f"Registration attempt for email: {user.email}, username: {user.username}")
+        
+        db_user = db.query(models.User).filter(models.User.email == user.email).first()
+        if db_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        db_user = db.query(models.User).filter(models.User.username == user.username).first()
+        if db_user:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        
+        hashed_password = get_password_hash(user.password)
+        db_user = models.User(
+            email=user.email,
+            username=user.username,
+            hashed_password=hashed_password,
+            roles=user.role,
+            created_at=datetime.utcnow(),
+            is_active=True,
+            is_verified=False
+        )
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        
+        print(f"User registered successfully: {user.username} (ID: {db_user.id})")
+        
+        # Create notification for new account
+        notification = models.Notification(
+            type="new_account",
+            content=f"New user registered: {user.username}",
+            extra_data=json.dumps({"user_id": db_user.id, "email": user.email})
+        )
+        db.add(notification)
+        db.commit()
+        
+        # Send welcome email asynchronously
+        print(f"Sending welcome email to: {user.email}")
+        email_success = await send_email_async(
+            user.email,
+            "Welcome to Audio Transcription API",
+            "welcome.html",
+            username=user.username
+        )
+        
+        if email_success:
+            print(f"Welcome email sent successfully to: {user.email}")
+        else:
+            print(f"Warning: Welcome email failed to send to: {user.email}")
+            # Don't fail the registration if email fails
+        
+        return db_user
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (like validation errors)
+        raise
+    except Exception as e:
+        print(f"Unexpected error during registration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during registration. Please try again."
+        )
 
 @app.post("/token", response_model=schemas.Token)
 async def login_for_access_token(
@@ -271,6 +366,7 @@ async def login_for_access_token(
 @app.post("/password-reset/")
 async def request_password_reset(
     reset_request: schemas.PasswordReset,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     try:
@@ -289,36 +385,59 @@ async def request_password_reset(
             expires_delta=timedelta(hours=1)
         )
         
-        # Create reset link
-        reset_link = f"http://196.27.126.114:8400/reset-password/{reset_token}"
+        # Create dynamic reset link based on the request
+        base_url = str(request.base_url).rstrip('/')
+        reset_link = f"{base_url}/reset-password/{reset_token}"
         
         print(f"Generated reset token for user: {user.username}")
+        print(f"Reset link: {reset_link}")
         
-        try:
-            # Send email
-            send_email(
-                user.email,
-                "Password Reset Request",
-                "password_reset.html",
-                username=user.username,
-                reset_token=reset_token,
-                reset_link=reset_link
-            )
-            print(f"Password reset email sent to: {user.email}")
-        except Exception as e:
-            print(f"Error sending password reset email: {str(e)}")
+        # Send password reset email using SendGrid
+        success = await send_email_async(
+            user.email,
+            "Password Reset Request",
+            "password_reset.html",
+            username=user.username,
+            reset_token=reset_token,
+            reset_link=reset_link
+        )
+        
+        if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send password reset email. Please try again later."
             )
         
-        return {"message": "If an account exists with this email, you will receive password reset instructions."}
+        print(f"Password reset email sent via SendGrid to: {user.email}")
+        
+        return {
+            "message": "If an account exists with this email, you will receive password reset instructions.",
+            "reset_link": reset_link
+        }
     except Exception as e:
         print(f"Unexpected error in password reset: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred. Please try again later."
         )
+
+@app.get("/reset-password/{token}")
+async def reset_password_page(token: str):
+    """
+    Serve the password reset page with the token
+    """
+    try:
+        # Verify the token is valid
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=400, detail="Invalid token")
+        
+        # Return the reset password HTML page
+        return FileResponse("templates/reset_password_form.html")
+        
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
 
 @app.post("/password-update/")
 async def update_password(
@@ -374,33 +493,31 @@ async def create_audio_file(
             )
         
         try:
-            # Create a temporary directory for processing
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Generate temp filename with appropriate extension
-                extension = get_file_extension(file.content_type)
-                temp_filename = os.path.join(temp_dir, f"temp_{uuid4().hex}{extension}")
-                
-                # Save the file
-                with open(temp_filename, "wb") as buffer:
-                    content = await file.read()
-                    buffer.write(content)
-                
-                # Create audio file record
-                audio_file = models.AudioFile(
-                    title=title,
-                    filename=os.path.basename(temp_filename),
-                    transcription=transcription,
-                    transcription_with_timestamps=transcription_with_timestamps,  # Can be None
-                    date=date,
-                    author=author,  # New field
-                    category=category,  # New field
-                    user_id=None
-                )
-                db.add(audio_file)
-                db.commit()
-                db.refresh(audio_file)
-
-                return audio_file
+            # Ensure audio_storage directory exists
+            os.makedirs(AUDIO_STORAGE_PATH, exist_ok=True)
+            # Generate a unique filename with appropriate extension
+            extension = get_file_extension(file.content_type)
+            unique_filename = f"{uuid4().hex}{extension}"
+            file_path = os.path.join(AUDIO_STORAGE_PATH, unique_filename)
+            # Save the file to audio_storage
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+            # Create audio file record
+            audio_file = models.AudioFile(
+                title=title,
+                filename=unique_filename,
+                transcription=transcription,
+                transcription_with_timestamps=transcription_with_timestamps,  # Can be None
+                date=date,
+                author=author,  # New field
+                category=category,  # New field
+                user_id=None
+            )
+            db.add(audio_file)
+            db.commit()
+            db.refresh(audio_file)
+            return audio_file
         except Exception as e:
             print(f"Error processing file: {str(e)}")
             raise HTTPException(
@@ -416,6 +533,7 @@ async def create_audio_file(
 
 @app.get("/audio-files/", response_model=List[schemas.AudioFile])
 async def get_all_audio_files(
+    request: Request,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
@@ -423,15 +541,16 @@ async def get_all_audio_files(
     try:
         print("Fetching audio files...")
         query = db.query(models.AudioFile)
-        
-        # Order by date descending (newest first)
         audio_files = query.order_by(models.AudioFile.date.desc()).offset(skip).limit(limit).all()
         print(f"Found {len(audio_files)} audio files")
-        
         if not audio_files:
-            return []  # Return empty list instead of 404 error
-        
-        return audio_files
+            return []
+        result = []
+        for audio_file in audio_files:
+            item = audio_file.__dict__.copy()
+            item["download_url"] = str(request.base_url) + f"audio-files/download/{audio_file.filename}"
+            result.append(item)
+        return result
     except Exception as e:
         print(f"Error in get_all_audio_files: {str(e)}")
         raise HTTPException(
@@ -439,9 +558,9 @@ async def get_all_audio_files(
             detail=f"Error fetching audio files: {str(e)}"
         )
 
-@app.get("/users/me/", response_model=schemas.User)
-async def read_users_me(current_user: models.User = Depends(get_current_active_user)):
-    return current_user
+@app.get("/users/me/")
+async def read_users_me():
+    return {"message": "Authentication not required for this endpoint."}
 
 @app.post("/login/", response_model=schemas.Token)
 async def login(
@@ -783,3 +902,39 @@ async def transcribe_audio(
     finally:
         # Clean up the temporary file
         os.unlink(temp_file_path)
+
+@app.get("/audio-files/download/{filename}")
+async def download_audio_file(filename: str):
+    file_path = os.path.join(AUDIO_STORAGE_PATH, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, media_type="audio/mpeg", filename=filename)
+
+@app.get("/audio-files/{sermon_id}")
+async def get_audio_file_by_id(sermon_id: int, request: Request, db: Session = Depends(get_db)):
+    audio_file = db.query(models.AudioFile).filter(models.AudioFile.id == sermon_id).first()
+    if not audio_file:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    # Build download URL
+    download_url = str(request.base_url) + f"audio-files/download/{audio_file.filename}"
+    # Prepare metadata
+    metadata = {
+        "id": audio_file.id,
+        "title": audio_file.title,
+        "filename": audio_file.filename,
+        "transcription": audio_file.transcription,
+        "transcription_with_timestamps": audio_file.transcription_with_timestamps,
+        "date": audio_file.date.isoformat() if audio_file.date else None,
+        "author": audio_file.author,
+        "category": audio_file.category,
+        "user_id": audio_file.user_id,
+        "created_at": audio_file.created_at.isoformat() if audio_file.created_at else None,
+        "download_url": download_url
+    }
+    return JSONResponse(content=metadata)
+
+@app.post("/notifications/mark-read/")
+async def mark_notification_read(db: Session = Depends(get_db)):
+    db.query(models.Notification).delete()
+    db.commit()
+    return {"detail": "All notifications cleared."}

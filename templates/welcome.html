@@ -10,43 +10,154 @@
             max-width: 600px;
             margin: 0 auto;
             padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #28a745;
+            margin-bottom: 10px;
+        }
+        .welcome-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
         }
         .verse {
             font-style: italic;
             color: #666;
-            margin: 20px 0;
-            padding: 15px;
-            border-left: 4px solid #4CAF50;
-            background-color: #f9f9f9;
+            margin: 25px 0;
+            padding: 20px;
+            border-left: 4px solid #28a745;
+            background-color: #f8f9fa;
+            border-radius: 5px;
         }
-        .signature {
+        .steps {
+            background-color: #e8f5e8;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 25px 0;
+        }
+        .steps h3 {
+            color: #28a745;
+            margin-top: 0;
+        }
+        .steps ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .steps li {
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .cta-button {
+            display: inline-block;
+            padding: 15px 30px;
+            background-color: #28a745;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 16px;
+            text-align: center;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .cta-button:hover {
+            background-color: #218838;
+        }
+        .footer {
             margin-top: 30px;
-            border-top: 1px solid #eee;
             padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+            color: #6c757d;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 25px 0;
+        }
+        .feature {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
-    <h1>Welcome {{ username }}!</h1>
-    
-    <p>Thank you for joining our Audio Transcription API community. We're excited to have you on board!</p>
-    
-    <p>With our service, you can easily transcribe your audio files and convert speech to text with high accuracy.</p>
-    
-    <div class="verse">
-        <p>"For I know the plans I have for you," declares the LORD, "plans to prosper you and not to harm you, plans to give you hope and a future."</p>
-        <p>- Jeremiah 29:11</p>
-    </div>
-    
-    <p>To get started:</p>
-    <ol>
-        <li>Log in to your account</li>
-        <li>Upload your first audio file</li>
-        <li>Let our AI-powered system transcribe it for you</li>
-    </ol>
-    
-    <div class="signature">
-        <p>Best regards,<br>The Audio Transcription Team</p>
+    <div class="container">
+        <div class="header">
+            <div class="welcome-icon">🎉</div>
+            <h1>Welcome to Audio Transcription API!</h1>
+            <p>Hello <strong>{{ username }}</strong>,</p>
+        </div>
+        
+        <p>Thank you for joining our Audio Transcription API community! We're excited to have you on board and can't wait to help you convert your audio files into accurate text transcriptions.</p>
+        
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🎵</div>
+                <strong>Audio Support</strong><br>
+                MP3, WAV, M4A, and more
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🤖</div>
+                <strong>AI-Powered</strong><br>
+                High accuracy transcription
+            </div>
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <strong>Fast Processing</strong><br>
+                Quick turnaround times
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📱</div>
+                <strong>Easy to Use</strong><br>
+                Simple upload and download
+            </div>
+        </div>
+        
+        <div class="steps">
+            <h3>🚀 Getting Started</h3>
+            <ol>
+                <li><strong>Log in</strong> to your account</li>
+                <li><strong>Upload</strong> your first audio file</li>
+                <li><strong>Wait</strong> for our AI to transcribe it</li>
+                <li><strong>Download</strong> your transcription</li>
+            </ol>
+        </div>
+        
+        <div class="verse">
+            <p>"For I know the plans I have for you," declares the LORD, "plans to prosper you and not to harm you, plans to give you hope and a future."</p>
+            <p><strong>- Jeremiah 29:11</strong></p>
+        </div>
+        
+        <p><strong>Ready to get started?</strong> Log in to your account and upload your first audio file!</p>
+        
+        <a href="#" class="cta-button">Login to Your Account</a>
+        
+        <div class="footer">
+            <p><strong>Best regards,</strong><br>The Audio Transcription API Team</p>
+            <p style="font-size: 12px; margin-top: 20px;">
+                If you have any questions, please don't hesitate to contact our support team.
+            </p>
+        </div>
     </div>
 </body>
 </html> 

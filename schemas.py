@@ -116,6 +116,7 @@ class NotificationBase(BaseModel):
     type: str
     content: str
     extra_data: Optional[str] = None
+    is_read: Optional[bool] = False
 
 class NotificationCreate(NotificationBase):
     pass
