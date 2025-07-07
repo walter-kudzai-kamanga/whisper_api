@@ -84,3 +84,5 @@ For SendGrid-specific issues:
 - [SendGrid Support](https://support.sendgrid.com/)
 
 For application-specific issues, check the application logs for detailed error messages. 
+
+## all done by deuce
