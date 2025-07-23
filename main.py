@@ -26,6 +26,7 @@ from contextlib import contextmanager
 import time
 from fastapi.responses import FileResponse, JSONResponse
 import requests
+import re
 
 from database import engine, get_db
 import models
@@ -922,6 +923,24 @@ async def download_audio_file(filename: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path, media_type="audio/mpeg", filename=filename)
 
+def format_transcription_into_paragraphs(text, sentences_per_paragraph=3):
+    # Split text into sentences (naive split on . ! ? followed by space or end)
+    sentence_endings = re.compile(r'([.!?])\s+')
+    sentences = []
+    start = 0
+    for match in sentence_endings.finditer(text):
+        end = match.end()
+        sentences.append(text[start:end].strip())
+        start = end
+    if start < len(text):
+        sentences.append(text[start:].strip())
+    # Group sentences into paragraphs
+    paragraphs = []
+    for i in range(0, len(sentences), sentences_per_paragraph):
+        paragraph = ' '.join(sentences[i:i+sentences_per_paragraph])
+        paragraphs.append(paragraph)
+    return '\n\n'.join([p for p in paragraphs if p])
+
 @app.get("/audio-files/{sermon_id}")
 async def get_audio_file_by_id(sermon_id: int, request: Request, db: Session = Depends(get_db)):
     audio_file = db.query(models.AudioFile).filter(models.AudioFile.id == sermon_id).first()
@@ -929,12 +948,14 @@ async def get_audio_file_by_id(sermon_id: int, request: Request, db: Session = D
         raise HTTPException(status_code=404, detail="Audio file not found")
     # Build download URL
     download_url = str(request.base_url) + f"audio-files/download/{audio_file.filename}"
+    # Format transcription into paragraphs
+    formatted_transcription = format_transcription_into_paragraphs(audio_file.transcription, 3) if audio_file.transcription else None
     # Prepare metadata
     metadata = {
         "id": audio_file.id,
         "title": audio_file.title,
         "filename": audio_file.filename,
-        "transcription": audio_file.transcription,
+        "transcription": formatted_transcription,
         "transcription_with_timestamps": audio_file.transcription_with_timestamps,
         "date": audio_file.date.isoformat() if audio_file.date else None,
         "author": audio_file.author,
