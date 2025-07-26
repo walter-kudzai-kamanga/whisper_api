@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Form, Request
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -875,46 +876,193 @@ async def list_all_users_and_admins(
 
 @app.post("/transcribe/")
 async def transcribe_audio(
-    file: UploadFile = File(...),
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    if not file.content_type in SUPPORTED_AUDIO_FORMATS:
+    # Parse multipart form data manually
+    form = await request.form()
+    files = []
+    
+    print(f"Form data keys: {list(form.keys())}")
+    
+    # Extract all files from the form data
+    for key, value in form.items():
+        print(f"Key: {key}, Type: {type(value)}, Value: {value}")
+        # Check if it's a file upload (either by type or by field name)
+        if (isinstance(value, (UploadFile, StarletteUploadFile)) or 
+            (hasattr(value, 'filename') and hasattr(value, 'content_type'))):
+            print(f"Found UploadFile: {value.filename}, content_type: {value.content_type}")
+            files.append(value)
+    
+    print(f"Total files found: {len(files)}")
+    
+    if not files:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file format. Supported formats: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}"
+            detail="No files provided"
         )
     
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=get_file_extension(file.content_type)) as temp_file:
-        # Copy the uploaded file to the temporary file
-        shutil.copyfileobj(file.file, temp_file)
-        temp_file_path = temp_file.name
+    results = []
+    temp_files = []
     
     try:
-        # Process the audio file
-        result = await process_audio_file(temp_file_path)
-        
-        # Create TranscriptionWithTimestamps object
-        timestamped_transcription = schemas.TranscriptionWithTimestamps(
-            segments=[
-                schemas.TimestampSegment(
-                    start_time=seg["start_time"],
-                    end_time=seg["end_time"],
-                    text=seg["text"]
+        for i, file in enumerate(files):
+            print(f"Processing file {i+1}: {file.filename}, content_type: {file.content_type}")
+            if not file.content_type in SUPPORTED_AUDIO_FORMATS:
+                print(f"Unsupported content_type: {file.content_type}")
+                print(f"Supported formats: {list(SUPPORTED_AUDIO_FORMATS.keys())}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file format for file {i+1}: {file.filename}. Supported formats: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}"
                 )
-                for seg in result["segments"]
-            ]
-        )
+            
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=get_file_extension(file.content_type)) as temp_file:
+                # Copy the uploaded file to the temporary file
+                shutil.copyfileobj(file.file, temp_file)
+                temp_file_path = temp_file.name
+                temp_files.append(temp_file_path)
+            
+            try:
+                # Process the audio file
+                result = await process_audio_file(temp_file_path)
+                
+                # Create TranscriptionWithTimestamps object
+                timestamped_transcription = schemas.TranscriptionWithTimestamps(
+                    segments=[
+                        schemas.TimestampSegment(
+                            start_time=seg["start_time"],
+                            end_time=seg["end_time"],
+                            text=seg["text"]
+                        )
+                        for seg in result["segments"]
+                    ]
+                )
+                
+                file_result = {
+                    "filename": file.filename,
+                    "transcription": result["text"],
+                    "transcription_with_timestamps": timestamped_transcription,
+                    "duration": result.get("duration", 0),
+                    "language": result.get("language", "en")
+                }
+                
+                results.append(file_result)
+                
+            except Exception as e:
+                # If one file fails, add error info but continue with others
+                results.append({
+                    "filename": file.filename,
+                    "error": str(e),
+                    "transcription": "",
+                    "transcription_with_timestamps": None,
+                    "duration": 0,
+                    "language": "en"
+                })
         
         return {
-            "transcription": result["text"],
-            "transcription_with_timestamps": timestamped_transcription,
-            "duration": result.get("duration", 0),
-            "language": result.get("language", "en")
+            "files": results,
+            "total_files": len(files),
+            "successful_transcriptions": len([r for r in results if "error" not in r])
         }
+        
     finally:
-        # Clean up the temporary file
-        os.unlink(temp_file_path)
+        # Clean up all temporary files
+        for temp_file_path in temp_files:
+            try:
+                os.unlink(temp_file_path)
+            except Exception as e:
+                print(f"Error cleaning up temporary file {temp_file_path}: {e}")
+
+# Alternative endpoint for multiple files with specific field names
+@app.post("/transcribe-multiple/")
+async def transcribe_multiple_audio(
+    file1: Optional[UploadFile] = File(None),
+    file2: Optional[UploadFile] = File(None),
+    file3: Optional[UploadFile] = File(None),
+    file4: Optional[UploadFile] = File(None),
+    file5: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    files = [f for f in [file1, file2, file3, file4, file5] if f is not None]
+    
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail="No files provided"
+        )
+    
+    results = []
+    temp_files = []
+    
+    try:
+        for i, file in enumerate(files):
+            print(f"Processing file {i+1}: {file.filename}, content_type: {file.content_type}")
+            if not file.content_type in SUPPORTED_AUDIO_FORMATS:
+                print(f"Unsupported content_type: {file.content_type}")
+                print(f"Supported formats: {list(SUPPORTED_AUDIO_FORMATS.keys())}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file format for file {i+1}: {file.filename}. Supported formats: {', '.join(SUPPORTED_AUDIO_FORMATS.keys())}"
+                )
+            
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=get_file_extension(file.content_type)) as temp_file:
+                # Copy the uploaded file to the temporary file
+                shutil.copyfileobj(file.file, temp_file)
+                temp_file_path = temp_file.name
+                temp_files.append(temp_file_path)
+            
+            try:
+                # Process the audio file
+                result = await process_audio_file(temp_file_path)
+                
+                # Create TranscriptionWithTimestamps object
+                timestamped_transcription = schemas.TranscriptionWithTimestamps(
+                    segments=[
+                        schemas.TimestampSegment(
+                            start_time=seg["start_time"],
+                            end_time=seg["end_time"],
+                            text=seg["text"]
+                        )
+                        for seg in result["segments"]
+                    ]
+                )
+                
+                file_result = {
+                    "filename": file.filename,
+                    "transcription": result["text"],
+                    "transcription_with_timestamps": timestamped_transcription,
+                    "duration": result.get("duration", 0),
+                    "language": result.get("language", "en")
+                }
+                
+                results.append(file_result)
+                
+            except Exception as e:
+                # If one file fails, add error info but continue with others
+                results.append({
+                    "filename": file.filename,
+                    "error": str(e),
+                    "transcription": "",
+                    "transcription_with_timestamps": None,
+                    "duration": 0,
+                    "language": "en"
+                })
+        
+        return {
+            "files": results,
+            "total_files": len(files),
+            "successful_transcriptions": len([r for r in results if "error" not in r])
+        }
+        
+    finally:
+        # Clean up all temporary files
+        for temp_file_path in temp_files:
+            try:
+                os.unlink(temp_file_path)
+            except Exception as e:
+                print(f"Error cleaning up temporary file {temp_file_path}: {e}")
 
 @app.get("/audio-files/download/{filename}")
 async def download_audio_file(filename: str):
