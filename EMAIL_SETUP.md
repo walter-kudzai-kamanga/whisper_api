@@ -67,13 +67,6 @@ The application uses Jinja2 templates located in the `templates/` directory:
 - **Statistics** - Monitor email performance
 - **Settings** - Configure webhooks, IP addresses, etc.
 
-## Migration from Other Providers
-
-The following email providers have been removed:
-- ❌ Gmail SMTP
-- ❌ Mailgun (SMTP and API)
-- ❌ Resend
-- ❌ FastAPI-Mail
 
 All email functionality now uses SendGrid exclusively for better reliability and deliverability.
 
@@ -85,4 +78,4 @@ For SendGrid-specific issues:
 
 For application-specific issues, check the application logs for detailed error messages. 
 
-## all done by deuce
+## all done by deuce THE GREAT
