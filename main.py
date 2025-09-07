@@ -963,7 +963,8 @@ async def transcribe_audio(
         return {
             "files": results,
             "total_files": len(files),
-            "successful_transcriptions": len([r for r in results if "error" not in r])
+            "successful_transcriptions": len([r for r in results if "error" not in r]),
+             "transcription": result["text"],
         }
         
     finally:
@@ -1053,7 +1054,8 @@ async def transcribe_multiple_audio(
         return {
             "files": results,
             "total_files": len(files),
-            "successful_transcriptions": len([r for r in results if "error" not in r])
+            "successful_transcriptions": len([r for r in results if "error" not in r]),
+            "transcription": result["text"],
         }
         
     finally:
