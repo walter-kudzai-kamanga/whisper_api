@@ -57,7 +57,7 @@ def start_server():
     # Kill any existing uvicorn processes
     subprocess.run(["pkill", "-f", "uvicorn"])
     # Start the server
-    subprocess.run(["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8700", "--reload"])
+    subprocess.run(["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8600", "--reload"])
 
 if __name__ == "__main__":
     # Create instance directory if it doesn't exist
