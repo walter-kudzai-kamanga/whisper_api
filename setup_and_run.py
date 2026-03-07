@@ -54,10 +54,10 @@ def setup_database():
 
 def start_server():
     print("Starting server...")
-    # Kill any existing uvicorn processes
+    # Kill existing uvicorn processes
     subprocess.run(["pkill", "-f", "uvicorn"])
-    # Start the server
-    subprocess.run(["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400", "--reload"])
+    # Replace current process with Uvicorn
+    os.execvp("uvicorn", ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400", "--reload"])
 
 if __name__ == "__main__":
     # Create instance directory if it doesn't exist
